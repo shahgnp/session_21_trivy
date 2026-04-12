@@ -1,0 +1,50 @@
+variables:
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: tcp://docker:2375
+  # Centralized image name for easy updates
+  IMAGE_NAME: $DOCKER_HUB_USER/flask-trivy-app-yourname:latest
+
+services:
+  - name: docker:24.0.5-dind
+    alias: docker
+
+stages:
+  - build
+  - scan
+
+build_image:
+  stage: build
+  image: docker:24.0.5
+  script:
+    # Login is only required here to PUSH the image
+    - docker login -u $DOCKER_HUB_USER -p $DOCKER_HUB_PWD
+    - docker build -t $IMAGE_NAME .
+    - docker push $IMAGE_NAME
+
+trivy_vulnerability_scan:
+  stage: scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - echo "Scanning public image $IMAGE_NAME for CRITICAL vulnerabilities..."
+    # --exit-code 1: Fail the pipeline if vulnerabilities are found
+    # --severity CRITICAL: Only care about the worst flaws
+    - trivy image --exit-code 1 --severity CRITICAL $IMAGE_NAME ## Need to change it to --exit-code 0
+
+generate_sbom:
+  stage: scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - echo "Generating Software Bill of Materials (SBOM) for $IMAGE_NAME..."
+    # CycloneDX is the industry standard format for SBOMs
+    - trivy image --format cyclonedx --output sbom.json $IMAGE_NAME
+  artifacts:
+    reports:
+      # This allows GitLab to show the artifact in the pipeline UI
+      cyclonedx: sbom.json
+    paths:
+      - sbom.json
+    expire_in: 1 week
